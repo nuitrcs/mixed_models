@@ -1,0 +1,405 @@
+---
+title: "Introduction to Linear Mixed Effects Models in R (lme4)"
+output:
+  html_document:
+    df_print: paged
+    code_download: TRUE
+    toc: true
+    toc_depth: 2
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r, setup, include=FALSE}
+# you don't need to run this when working in RStudio
+knitr::opts_chunk$set(eval=FALSE)  # when making the html version of this file, don't execute the code
+```
+
+This notebook assumes that you have basic familiarity with statistics and, particularly, linear regression.
+
+## Why Linear Mixed Effects Models (LMM)?
+
+Linear regression assumes that observations are independent. However, often observations are not independent. LMM are a useful and flexible way to analyze non-independent data.
+
+### Exercise 1
+
+Please type in the chat examples of non-independent data.
+
+## What are LMM?
+
+LMM are a generalization of linear regression that allows for both fixed and random effects. By doing this, LMM account for various sources of variability and provide structure to the error term.
+
+Fixed and random effects are tricky terms. There are [different ways](https://statmodeling.stat.columbia.edu/2005/01/25/why_i_dont_use/) to think about them. For this notebook, fixed effects can be thought of as parameters that don't vary, while random effects can be thought of as parameters that do vary (or that are random variables).
+
+In linear regression, the data are random variables, but the parameters (i.e., the coefficients) are fixed effects. In LMM the parameters can be both fixed and random effects.
+
+It is important to note that random effects are always categorical variables and researchers are typically not interested in their impact on the outcome variable. It is often recommended that random effects have several categories (so that the variance can be properly estimated). One consequence of modeling a variable as a fixed or a random effect is the information that you get. In the case of fixed effects, you get an estimate of its association with the outcome variable. In the case of random effects, you only get an estimate of the variance associated with it.
+
+It is worth noting that, besides LMM, there are generalized linear mixed models (or GLMM). GLMM allow for outcome variables that are not normally distributed (e.g., binary). This notebook doesn't cover GLMM, but you can find more resources at the end.
+
+### Note on terminology
+
+One thing that can make LMM confusing is that they can take different names depending on the specific case or across disciplines. Some common terminology that you may encounter includes: hierarchical linear models, multilevel models, and growth curve models. Some specific models can include: random intercepts model, random slopes model, intercept-as-outcome model, and slopes-as-outcome model.
+
+### Exercise 2
+
+For each of these examples, please type in the chat what would be the random effect:
+
+a.  Students nested within classrooms
+b.  Individuals nested within countries
+c.  Patients nested within doctors
+d.  A within-subject experiment with several survey responses per participant
+e.  A panel of states observed over time
+
+## Why LMM in lme4?
+
+[lme4](https://cran.r-project.org/web/packages/lme4/index.html) and [nlme](https://cran.r-project.org/web/packages/nlme/index.html) are the most common R packages for LMM. The [documentation of lme4](https://cran.r-project.org/web/packages/lme4/lme4.pdf) explains the differences between the two packages (p. 4). In many cases you can probably use either. This notebook focuses on lme4, which seems to have [somewhat superseded nlme](https://stats.stackexchange.com/questions/5344/how-to-choose-nlme-or-lme4-r-library-for-mixed-effects-models) and is more common.
+
+## Loading libraries
+
+```{r}
+library(lme4)
+library(haven) # to load sav file
+```
+
+## Reading data
+
+```{r}
+# https://www.rensvandeschoot.com/tutorials/lme4/
+popular2data <- read_sav("data/popular2.sav")
+
+# Convert class to factor
+popular2data$class <- factor(popular2data$class)
+
+# https://m-clark.github.io/mixed-models-with-R/appendix.html
+load('data/gpa.Rdata')
+```
+
+The popularity dataset contains characteristics of students in different classes. The gpa dataset contains observations over time for college students.
+
+## Common LMM
+
+Please note that when using LMM you still need to conduct a good exploratory data analysis, which this notebook doesn't include.
+
+### Intercept only model
+
+Let's start with the most simple model--one with only an intercept.
+
+This is the notation as a multilevel model (where i is the index for students and j for classes):
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \beta_{0j} + \epsilon_{ij} \\
+    \beta_{0j} &= \gamma_{00} + \delta_{0j} \\
+\end{align*}
+```
+
+You can plug the second level into the first level:
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \gamma_{00} + \delta_{0j} + \epsilon_{ij} \\
+\end{align*}
+```
+
+lmer is the function provided by lme4 to fit LMM. This is how to implement the intercept only model:
+
+```{r}
+lmm1 <- lmer(formula = popular ~ 1 + (1 | class), data = popular2data)
+```
+
+This is what the code means:
+
+-   `popular ~ 1` means that we want to predict popular based on an intercept
+-   the parentheses specify the random effects. In this case, the 1 indicates an intercept and `| class` indicates that class is the grouping variable.
+
+```{r}
+summary(lmm1)
+```
+
+The output provides coefficients for the fixed effects and variance components for the random effects. In this case, the only coefficient is the intercept. There are two variance components: the variance associated with classes (0.7) and the residual variance (1.2). Together, they represent the total variance (0.7 + 1.2 = 1.9). From this, you can get the interclass correlation, or the proportion of variance accounted for by the classes: 0.7 / 1.9 = 0.36.
+
+Please note that [lmer doesn't provide p-values](https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#why-doesnt-lme4-display-denominator-degrees-of-freedomp-values-what-other-options-do-i-have). Calculating p-values for mixed models is not as simple as with linear models. However, you can get confidence intervals:
+
+```{r}
+confint(lmm1)
+```
+
+Also, you can take a look at [lmerTest](https://cran.r-project.org/web/packages/lmerTest/index.html), which provides p-values for lmer models.
+
+#### Exercise 3
+
+Fit an intercept only model to predict gpa in the gpa data.
+
+You can code here:
+
+```{r}
+
+```
+
+### First level predictors
+
+We may want to add predictors at the student level (level 1).
+
+This is the notation as a multilevel model (where i is the index for students and j for classes):
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \beta_{0j} + \beta_{1j} sex + \beta_{2j} extrav + \epsilon_{ij} \\
+    \beta_{0j} &= \gamma_{00} + \delta_{0j} \\
+    \beta_{1j} &= \gamma_{10} \\
+    \beta_{2j} &= \gamma_{20} \\
+\end{align*}
+```
+
+You can plug the second level into the first level:
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \gamma_{00} + \gamma_{10} sex + \gamma_{20} extrav + \delta_{0j} + \epsilon_{ij} \\
+\end{align*}
+```
+
+This is what the code looks like:
+
+```{r}
+lmm2 <- lmer(formula = popular ~ sex + extrav + (1 | class), data = popular2data)
+```
+
+In this case, we add sex and extrav as fixed effects. As in the common R syntax, we specify this as `popular ~ sex + extrav` outside of the parentheses.
+
+```{r}
+summary(lmm2)
+```
+
+In this case, we obtain coefficients for sex and extrav, which can be interpreted as usual in linear regression.
+
+### First and second level predictors
+
+In addition to variables at the student level (level 1), we may want to add variables at the class level (level 2). In this case, we specify them as fixed effects.
+
+This is the notation as a multilevel model (where i is the index for students and j for classes):
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \beta_{0j} + \beta_{1j} sex + \beta_{2j} extrav + \epsilon_{ij} \\
+    \beta_{0j} &= \gamma_{00} + \gamma_{01} texp + \delta_{0j} \\
+    \beta_{1j} &= \gamma_{10} \\
+    \beta_{2j} &= \gamma_{20} \\
+\end{align*}
+```
+
+You can plug the second level into the first level:
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \gamma_{00} + \gamma_{01} texp + \gamma_{10} sex + \gamma_{20} extrav + \delta_{0j} + \epsilon_{ij} \\
+\end{align*}
+```
+
+This is what the code looks like:
+
+```{r}
+lmm3 <- lmer(popular ~ sex + extrav + texp + (1 | class), data = popular2data)
+```
+
+Using the same syntax, we add texp, which measures teacher experience.
+
+```{r}
+summary(lmm3)
+```
+
+Similarly, we also get a coefficient for texp.
+
+#### Exercise 4
+
+Fit a model with first and second level predictors (occasion and sex, respectively) to predict gpa in the gpa data. Include them as fixed effects.
+
+You can code here:
+
+```{r}
+
+```
+
+### First and second level predictors with random slopes
+
+So far, we have only been adding random intercepts. In other words, we have allowed the intercept to vary across classes. However, we can also add random slopes, or allow coefficients to vary across classes.
+
+This is the notation as a multilevel model (where i is the index for students and j for classes):
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \beta_{0j} + \beta_{1j} sex + \beta_{2j} extrav + \epsilon_{ij} \\
+    \beta_{0j} &= \gamma_{00} + \gamma_{01} texp + \delta_{0j} \\
+    \beta_{1j} &= \gamma_{10} \\
+    \beta_{2j} &= \gamma_{20} + \delta_{2j} \\
+\end{align*}
+```
+
+You can plug the second level into the first level:
+
+```{=tex}
+\begin{align*}
+    popular_{ij} &= \gamma_{00} + \gamma_{01} texp + \gamma_{10} sex + \gamma_{20} extrav + \delta_{0j} + \delta_{2j} extrav + \epsilon_{ij} \\
+\end{align*}
+```
+
+This is the code:
+
+```{r}
+lmm4 <- lmer(formula = popular ~ sex + extrav + texp + (1 + extrav |class), data = popular2data)
+```
+
+In this case, we're not only adding extrav outside of the parentheses, but also inside: `(1 + extrav |class)`. This specifies the random slopes.
+
+```{r}
+summary(lmm4)
+```
+
+The output provides coefficients for sex, extrav, and texp--the fixed effects. Also, the estimated variance components change in this case. The variance associated with class is decomposed into the intercept and extrav.
+
+#### Exercise 5
+
+As in exercise 4, fit a model with first and second level predictors (occasion and sex, respectively) to predict gpa in the gpa data. In this case, allow the slope of occasion to vary across students.
+
+You can code here:
+
+```{r}
+
+```
+
+### Bonus: assumptions and diagnostics
+
+LMM share the assumptions of linear models, but drop the assumption of independence and replace it with a new one, as explained below.
+
+Please note that, in addition to checking the assumptions below, it is good practice to make sure that your predictors are not highly correlated with each other (multicollinearity) and that your model is not influenced by unusual observations (outliers). You can learn more about the assumptions of linear models [here](https://sscc.wisc.edu/sscc/pubs/RegDiag-Stata/model-assumptions.html).
+
+For simplicity, we'll use this model for diagnostics:
+
+```{r}
+lmm_diagnostics <- lmer(formula = popular ~ extrav + (1 | class), data = popular2data)
+
+residuals_diagnostics <- residuals(lmm_diagnostics, type = "pearson")
+```
+
+#### Linearity
+
+Assumption: the model is linear in the parameters. The residuals have a mean of zero across the range of the fitted values and the predictors.
+
+A violation of this assumption could bias coefficient estimates.
+
+You can check this assumption with a plot of the residuals against the fitted values. You don't want to see any deviations from a linear form:
+
+```{r}
+plot(lmm_diagnostics)
+```
+
+You should also check the linearity of each of the explanatory variables. You can do this with plots of the residuals against each of the explanatory variables:
+
+```{r}
+plot(popular2data$extrav, residuals_diagnostics)
+lines(lowess(popular2data$extrav, residuals_diagnostics), col = "red")
+```
+
+#### Homoscedasticity
+
+Assumption: the residuals have equal variance across the range of fitted values and predictors.
+
+A violation of this assumption could affect the standard errors.
+
+You can check this assumption by exploring a plot of the residuals against the fitted values. Please refer back to the first chunk of code provided for linearity (`plot(lmm_diagnostics)`).
+
+#### Normality
+
+Assumption: the residuals are normally distributed.
+
+A severe violation of this assumption could affect the estimates of the standard errors.
+
+You can check this assumption by exploring a q-q plot. You don't want to see significant deviations from a diagonal line:
+
+```{r}
+qqnorm(residuals_diagnostics)
+```
+
+#### Independence
+
+Assumption: the effects associated with the levels of the random variable are uncorrelated with the means of the fixed effects.
+
+A violation of this assumption could bias coefficient estimates.
+
+You can check this assumption by exploring the correlation between the group means of the explanatory variables and the effects associated with the levels of the random variable without modeling it as random:
+
+```{r}
+# Mean extrav for each class
+means <- aggregate(popular2data[ , "extrav"] , by = list(popular2data$class), FUN = mean)
+
+# Coefficients from linear model (without random variable)
+lmcoefs <- summary(lm(popular ~ extrav + class, data = popular2data))$coefficients[ , "Estimate"]
+
+# Getting only the coefficients for class and adding 0 for reference level
+means$effects <- c(0, lmcoefs[substr(names(lmcoefs), 1, 2) == "cl"])
+
+# Correlation between group means of extrav and the effect associated with the levels of class
+cor(means[ , c("extrav", "effects")])
+```
+
+## Recap
+
+This notebook provided an introduction to LMM, why they are useful, and how to implement some common models using lme4.
+
+The notebook also reviewed the assumptions of LMM and some diagnostics.
+
+## References and resources to continue learning
+
+This notebook draws from these resources, which are a good place to continue learning:
+
+-   [Introduction to linear mixed models](https://stats.oarc.ucla.edu/other/mult-pkg/introduction-to-linear-mixed-models/) from UCLA's Advanced Research Computing (you can find references to many books here)
+-   [Introduction to generalized linear mixed models](https://stats.oarc.ucla.edu/other/mult-pkg/introduction-to-generalized-linear-mixed-models/) from UCLA's Advanced Research Computing (you can find references to many books here)
+-   [Mixed effects logistic regression](https://stats.oarc.ucla.edu/r/dae/mixed-effects-logistic-regression/) from UCLA's Advanced Research Computing
+-   [Mixed Models: Introduction](https://www.ssc.wisc.edu/sscc/pubs/MM/MM_Introduction.html) from the Social Science Computing Cooperative at the University of Wisconsin-Madison
+-   [Mixed Models with R](https://m-clark.github.io/mixed-models-with-R/) from Michael Clark
+-   [An Introduction to Linear Mixed-Effects Modeling in R](https://journals.sagepub.com/doi/10.1177/2515245920960351) from Violet A. Brown
+-   [lme4 Tutorial: Popularity Data](https://www.rensvandeschoot.com/tutorials/lme4/) from Laurent Smeets and Rens van de Schoot
+-   [Hierarchical Linear Models](https://us.sagepub.com/en-us/nam/hierarchical-linear-models/book9230) by Raudenbush and Bryk
+-   [An Introduction to Mixed Models for Experimental Psychology](https://discovery.ucl.ac.uk/id/eprint/10107874/1/singmann_kellen-introduction-mixed-models%281%29.pdf) by Signmann and Kellen
+
+## Answers to the exercises
+
+### Exercise 1
+
+These are some common examples of non-independent data:
+
+a.  Students nested within classrooms
+b.  Individuals nested within countries
+c.  Patients nested within doctors
+d.  A within-subject experiment with several survey responses per participant
+e.  A panel of states observed over time
+
+### Exercise 2
+
+a.  Students nested within classrooms (classrooms)
+b.  Individuals nested within countries (countries)
+c.  Patients nested within doctors (doctors)
+d.  A within-subject experiment with several survey responses per participant (participants)
+e.  A panel of states observed over time (states)
+
+### Exercise 3
+
+```{r}
+gpa_1 <- lmer(formula = gpa ~ 1 + (1 | student), data = gpa)
+summary(gpa_1)
+```
+
+### Exercise 4
+
+```{r}
+gpa_2 <- lmer(formula = gpa ~ occasion + sex + (1 | student), data = gpa)
+summary(gpa_2)
+```
+
+### Exercise 5
+
+```{r}
+gpa_2 <- lmer(formula = gpa ~ occasion + sex + (1 + occasion | student), data = gpa)
+summary(gpa_2)
+```
